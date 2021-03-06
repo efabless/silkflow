@@ -17,7 +17,7 @@
 # limitations under the License.
 
 from .vpr import run_genfasm, run_vpr, device_base
-from .util import eprint, r, d2nt, extract_pixz
+from .util import eprint, r, d2nt, mkdirp, extract_pixz
 from .file import FileManager
 
 import click
@@ -30,9 +30,15 @@ import subprocess
 import functools
 from timeit import default_timer as timer
 
+
 arch = os.environ.get("SYMBIFLOW_ARCH") or "ice40"
 symbiflow_base_dir = os.getenv("SYMBIFLOW_BASE") or "/opt/symbiflow"
 archive_realpath = os.getenv("SILKFLOW_PIXZ_ARCHIVE")
+
+UNSUPPORTED_ARCH_STR = "FPGA family %s not yet supported by Silkflow." % arch
+
+if arch not in ["ice40", "xc7"]:
+    raise Exception(UNSUPPORTED_ARCH_STR)
 
 __version__ = "0.0.1"
 __project_name__ = "Silkflow"
@@ -40,8 +46,11 @@ __project_name__ = "Silkflow"
 fm = FileManager(symbiflow_base_dir, archive_realpath)
 current_project = os.path.basename(os.getcwd())
 
-def synth_fn(top_module, verilog_files):
+def synth_fn(top_module, device, part, prxray_device, xdc_files, verilog_files):
     COMMAND_NAME = "synth"
+
+    if type(xdc_files) == str:
+        xdc_files = xdc_files.split(":")
 
     log_file = "%s_%s.log" % (current_project, COMMAND_NAME)
     output_json = "%s_%s.json" % (current_project, COMMAND_NAME)
@@ -53,6 +62,20 @@ def synth_fn(top_module, verilog_files):
     modified_env["OUT_SYNTH_V"] = output_verilog
     modified_env["OUT_EBLIF"] = output_eblif
     modified_env["TOP"] = top_module
+
+    if arch == "xc7":
+        modified_env["INPUT_XDC_FILE"] = " ".join(xdc_files)
+        modified_env["USE_ROI"] = "FALSE"
+        modified_env["TECHMAP_PATH"] = fm.get_techmap_path(arch)
+
+        database_dir = r(["prjxray-config"], pipe_stdout=True).strip()
+        modified_env["PART_JSON"] = os.path.join(database_dir, prxray_device, part, "part.json")
+
+        modified_env["OUT_FASM_EXTRA"] = "%s_fasm_extra.fasm" % top_module
+        modified_env["OUT_SDC"] = "%s.sdc" % top_module
+
+        modified_env["PYTHON3"] = sys.executable
+        modified_env["UTILS_PATH"] = fm.scripts
 
     r([
         "yosys",
@@ -104,6 +127,7 @@ def generate_constraints_fn(top_module, device, eblif, part, pcf, net, sdc):
     if arch == "ice40":
         iogen_script = fm.get_arch_script(arch, "ice40_create_ioplace.py")
         ioplace_file = "%s.io.place" % current_project
+        
         ioplace_data = r([
             "python3",
             iogen_script,
@@ -115,20 +139,22 @@ def generate_constraints_fn(top_module, device, eblif, part, pcf, net, sdc):
         ], env=python_env)
 
         return ioplace_file
-    else:
+    elif arch == "xc7":
         vpr_grid_map = arch_info.vpr_grid_map
 
-        iogen_script = fm.get_script("create_ioplace.py")
-        constraint_gen_script = fm.get_script("create_place_constraints.py")
+        iogen_script = fm.get_script("prjxray_create_ioplace.py")
+        constraint_gen_script = fm.get_script("prjxray_create_place_constraints.py")
 
         ioplace_file = "%s.ioplace" % current_project
-        ioplace_data = r([
+        cmd = [
             "python3",
             iogen_script,
             "--blif", eblif,
             "--net", net,
             "--map", pin_map
-        ] + pcf_options, env=python_env, pipe_stdout=True)
+        ] + pcf_options
+
+        ioplace_data = r(cmd, env=python_env, pipe_stdout=True)
 
         with open(ioplace_file, 'w') as f:
             f.write(ioplace_data)
@@ -140,7 +166,8 @@ def generate_constraints_fn(top_module, device, eblif, part, pcf, net, sdc):
             "--blif", eblif,
             "--net", net,
             "--vpr_grid_map", vpr_grid_map,
-            "--input", ioplace_file
+            "--input", ioplace_file,
+            "--arch", arch_info.definition
         ], env=python_env, pipe_stdout=True)
 
         with open(constraints_file, 'w') as f:
@@ -180,15 +207,15 @@ def write_fasm_fn(top_module, device, eblif, part, pcf, net, sdc):
     if os.path.exists(fasm_extra):
         eprint("Found fasm extra, concatenating with existing result…")
 
-        fasm = open(fasm).read()
+        fasm_data = open(fasm).read()
         extra_data = open(fasm_extra).read()
         with open(fasm, 'w') as f:
-            f.write(fasm)
+            f.write(fasm_data)
             f.write(extra_data) 
 
     return fasm
 
-def write_bitstream_fn(top_module, device, bit, fasm, part):
+def write_bitstream_fn(top_module, device, pxray_device, bit, fasm, part, frm2bit):
     if arch == "ice40":
         python_env = fm.get_python_env(arch)
         fasm2asc_script = fm.get_arch_script(arch, "fasm_icebox/fasm2asc.py")
@@ -208,8 +235,28 @@ def write_bitstream_fn(top_module, device, bit, fasm, part):
 
         with open("%s.bin" % top_module, 'wb') as f:
             f.write(bitstream)
-    else:
-        raise Exception("Not yet implemented.")
+    elif arch == "xc7":
+        python_env = fm.get_python_env(arch)
+
+        dbroot = r(["prjxray-config"], pipe_stdout=True).strip()
+        dbroot = os.path.join(dbroot, pxray_device)
+
+        frm2bit_args = []
+        if frm2bit is not None:
+            frm2bit_args.append("--frm2bit"),
+            frm2bit_args.append(frm2bit)
+        
+        r([
+            "xcfasm",
+            "--db-root", dbroot,
+            "--part", part,
+            "--part_file", "%s/%s/part.yaml" % (dbroot, part),
+            "--sparse",
+            "--emit_pudc_b_pullup",
+            "--fn_in", fasm,
+            "--bit_out", bit
+        ] + frm2bit_args, env=python_env)
+        
 
 # -- CLI --
 @click.group()
@@ -219,7 +266,7 @@ def cli():
 
 def vpr_options(fn):
     @click.option('-t', '--top-module', required=True, help="Top module")
-    @click.option('-d', '--device', required=True)
+    @click.option('-D', '--device', required=True)
     @click.option('-e', '--eblif', required=True)
     @click.option('-P', '--part', default=None)
     @click.option('-p', '--pcf', default=None)
@@ -233,9 +280,13 @@ def vpr_options(fn):
 
 @click.command('synth', help="Synthesize")
 @click.option('-t', '--top-module', required=True, help="Top module")
+@click.option('-D', '--device', default=None, help="required if xc7")
+@click.option('-P', '--part', default=None, help="required if xc7")
+@click.option('-X', '--pxray-device', default=None, help="xc7 only, required - name of the device according to project xray (i.e. artix7, zynq7…)")
+@click.option('-x', '--xdc-files', default=None, help="xc7 only - XDC files (comma,separated). File paths may not contain spaces.")
 @click.argument('verilog_files', required=True, nargs=-1)
-def synth(top_module, verilog_files):
-    return synth_fn(top_module, verilog_files)
+def synth(top_module, device, part, pxray_device, xdc_files, verilog_files):
+    return synth_fn(top_module, device, pxray_device, part, xdc_files, verilog_files)
 cli.add_command(synth)
 
 @click.command('pack', help="Pack")
@@ -270,29 +321,34 @@ cli.add_command(write_fasm)
 
 @click.command('write_bitstream', help="Write bitstream")
 @click.option('-t', '--top-module', required=True, help="Top module")
-@click.option('-d', '--device', required=True)
+@click.option('-D', '--device', required=True)
+@click.option('-X', '--pxray-device', default=None, help="xc7 only, required - name of the device according to project xray (i.e. artix7, zynq7…)")
 @click.option('-b', '--bit', required=True)
 @click.option('-f', '--fasm', required=True)
 @click.option('-P', '--part', default=None)
-def write_bitstream(top_module, device, bit, fasm, part):
-    return write_bitstream_fn(top_module, device, bit, fasm, part)
+@click.option('-F', '--frm2bit', default=None, help="xc7 only - frames to bit file")
+def write_bitstream(top_module, device, pxray_device, bit, fasm, part, frm2bit):
+    return write_bitstream_fn(top_module, device, pxray_device, bit, fasm, part, frm2bit)
 cli.add_command(write_bitstream)
 
 @click.command('run', help="Full flow")
 @click.option('-t', '--top-module', required=True, help="Top module")
-@click.option('-d', '--device', required=True)
+@click.option('-D', '--device', required=True)
 @click.option('-P', '--part', required=True)
+@click.option('-X', '--pxray-device', default=None, help="xc7 only, required - name of the device according to project xray (i.e. artix7, zynq7…)")
 @click.option('-p', '--pcf', default=None)
 @click.option('-b', '--bit', default=None)
+@click.option('-x', '--xdc-files', default=None, help="xc7 only - XDC files (comma,separated). File paths may not contain spaces.")
+@click.option('-F', '--frm2bit', default=None, help="xc7 only - frames to bit file")
 @click.argument('verilog_files', required=True, nargs=-1)
-def run(top_module, device, part, pcf, bit, verilog_files):
+def run(top_module, device, part, pxray_device, pcf, bit, xdc_files, verilog_files, frm2bit):
     start = timer()
     eprint("Starting flow…")
 
     eprint("\n---\n")
 
     eprint("Synthesizing…")
-    synth_out = synth_fn(top_module, verilog_files)
+    synth_out = synth_fn(top_module, device, part, pxray_device, xdc_files, verilog_files)
     eblif = synth_out.eblif
 
     eprint("Packing…")
@@ -308,7 +364,7 @@ def run(top_module, device, part, pcf, bit, verilog_files):
     fasm = write_fasm_fn(top_module, device, eblif, part, pcf, net, None)
 
     eprint("Writing bitstream…")
-    write_bitstream_fn(top_module, device, bit, fasm, part)
+    write_bitstream_fn(top_module, device, pxray_device, bit, fasm, part, frm2bit)
     end = timer()
     eprint("Bitstream generated in %fs." % (end-start))
 cli.add_command(run)
@@ -326,7 +382,14 @@ def setup(install_dir, family, pixz_archive):
 
     archive_realpath = os.path.realpath(pixz_archive)
 
-    extract_pixz(pixz_archive, family_path, ["environment.yml", "requirements.txt", "install/share/symbiflow/scripts"])
+    mkdirp(family_path)
+
+    pixz_list = r(["pixz", "-l", pixz_archive], pipe_stdout=True).split("\n")
+
+    # Extract all except the massive arch definitions (extracted just-in-time)
+    pixz_extractable = list(filter(lambda x: not (x == "") and not x.endswith("/") and not x.startswith("install/share/symbiflow/arch/"), pixz_list)) 
+
+    extract_pixz(pixz_archive, family_path, pixz_extractable)
 
     r([
         "conda", "env", "create", "--verbose", "-f",

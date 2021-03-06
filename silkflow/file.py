@@ -44,6 +44,11 @@ class FileManager(object):
         with Halo(text='Extracting arch info…', spinner='dots'):
             extract_pixz(self.archive_realpath, extract_path, relative_files)
 
+    def get_techmap_path(self, arch):
+        if arch == "xc7":
+            return os.path.join(self.share, "techmaps", "xc7_vpr", "techmap")
+        raise Exception("Architecture %s has no techmaps." % arch)
+
     def get_script(self, scr):
         return os.path.join(self.scripts, scr)
 
@@ -54,14 +59,18 @@ class FileManager(object):
         return os.path.join(self.get_arch_script_folder(arch), scr)
 
     def get_yosys_script(self, arch, scr):
+        if arch == "xc7":
+            return os.path.join(self.scripts, arch, scr)
         return os.path.join(self.scripts, arch, "yosys", scr)
 
     def get_arch_info(self, arch, device):
-        arch_dir = os.path.join(self.devices, arch)
+        device_underscored = "_".join(device.split("-"))
+
         if arch == "ice40":
-            device_dotted = ".".join(device.split("-"))
-            device_underscored = "_".join(device.split("-"))
+            arch_dir = os.path.join(self.devices, arch)
+
             def pinmap(for_part): # This is a function as some other architectures factor the part in.
+                device_dotted = ".".join(device.split("-"))
                 device_pinmap = os.path.join(arch_dir, "layouts", "icebox", "%s.pinmap.csv" % device_dotted)
                 self.jit_extract([device_pinmap])
                 return device_pinmap
@@ -78,8 +87,26 @@ class FileManager(object):
             architecture_data["pinmap"] = pinmap
 
             return d2nt(architecture_data)
-        else:
-            raise Exception("Unsupported architecture.")
+        elif arch == "xc7":
+            arch_dir = os.path.join(self.share, "arch")
+            
+            def pinmap(for_part):
+                device_pinmap = os.path.join(arch_dir, device_underscored, for_part, "pinmap.csv")
+                self.jit_extract([device_pinmap])
+                return device_pinmap
+
+            architecture_data = {
+                "definition": os.path.join(arch_dir, device_underscored, "arch.timing.xml"),
+                "rr_graph": os.path.join(arch_dir, device_underscored, "rr_graph_%s.rr_graph.real.bin" % device_underscored),
+                "place_delay": os.path.join(arch_dir, device_underscored, "rr_graph_%s.place_delay.bin" % device_underscored),
+                "vpr_grid_map": os.path.join(arch_dir, device_underscored, "vpr_grid_map.csv")
+            }
+            
+            self.jit_extract(architecture_data.values())
+
+            architecture_data["pinmap"] = pinmap
+
+            return d2nt(architecture_data)
 
     def get_python_path(self, arch):
         paths = [self.scripts, self.get_arch_script_folder(arch)]
@@ -91,6 +118,8 @@ class FileManager(object):
             icebox_path = icebox_result.strip()
             icebox_dir = os.path.dirname(icebox_path)
             paths.append(icebox_dir)
+        elif arch == "xc7":
+            paths.append(os.path.join(self.scripts, "lib"))
         return ":".join(paths)
 
     def get_python_env(self, arch):

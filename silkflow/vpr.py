@@ -54,6 +54,8 @@ def run_vpr(top_module, arch, device, eblif, sdc, sfpath, args, noisy_warnings_l
     if sdc is not None:
         sdc_arg = ["--sdc", sdc_arg]
 
+    device_name = device
+
     arch_info = sfpath.get_arch_info(arch, device)
     r(
         [
@@ -73,7 +75,7 @@ def run_genfasm(top_module, arch, device, eblif, sfpath, args, noisy_warnings_lo
     env_modification = used_env.copy()
     env_modification["TOP"] = top_module
 
-    arch_info = sfpath.get_arch_info("ice40", device)
+    arch_info = sfpath.get_arch_info(arch, device)
     r(
         [
             "genfasm",

@@ -17,6 +17,7 @@
 import os
 import sys
 import subprocess
+import pathlib
 from collections import namedtuple
 
 def eprint(*args, **kwargs):
@@ -38,6 +39,9 @@ def r(cmd, pipe_stdout=False, binary=False, **kwargs):
 
 def d2nt(dictionary):
     return namedtuple('result', dictionary.keys())(**dictionary)
+
+def mkdirp(path):
+    pathlib.Path(path).mkdir(parents=True, exist_ok=True)
 
 def extract_pixz(archive, extraction_path, files):
     pixz_file = open(archive)
