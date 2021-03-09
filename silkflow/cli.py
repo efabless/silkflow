@@ -382,12 +382,9 @@ def setup(install_dir, family, pixz_archive):
 
     archive_realpath = os.path.realpath(pixz_archive)
 
-    mkdirp(family_path)
+    pixz_list = r(["pixz", "-l", pixz_archive], pipe_stdout=True).strip().rstrip().split("\n")
 
-    pixz_list = r(["pixz", "-l", pixz_archive], pipe_stdout=True).split("\n")
-
-    # Extract all except the massive arch definitions (extracted just-in-time)
-    pixz_extractable = list(filter(lambda x: not (x == "") and not x.endswith("/") and not x.startswith("install/share/symbiflow/arch/"), pixz_list)) 
+    pixz_extractable = list(filter(lambda x: not x.endswith("/") and not x.startswith("install/share/symbiflow/arch/"), pixz_list)) 
 
     extract_pixz(pixz_archive, family_path, pixz_extractable)
 

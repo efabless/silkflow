@@ -130,3 +130,7 @@ dmypy.json
 # Parser
 parser.out
 parsetab.py
+
+# Etc
+*.pixz
+/symbiflow

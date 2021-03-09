@@ -46,14 +46,12 @@ def mkdirp(path):
 def extract_pixz(archive, extraction_path, files):
     pixz_file = open(archive)
 
-    extraction_array = []
-    for file in files:
-        extraction_array.append("-x")
-        extraction_array.append(file)
+    mkdirp(extraction_path)
 
     tarball = r([
         "pixz",
-    ] + extraction_array, pipe_stdout=True, binary=True, stdin=pixz_file)
+        "-x"
+    ] + files, pipe_stdout=True, binary=True, stdin=pixz_file)
 
     tar_process = subprocess.Popen([
         "tar",
