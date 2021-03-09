@@ -5,7 +5,7 @@ A saner, python-based utility for working with Symbiflow scripts, binaries and a
 * GNU/Linux - A number of the dependent conda packages don't support macOS and none of them support Microsoft Windows.
 * Miniconda - https://docs.conda.io/en/latest/miniconda.html < This requires like 10 GB free space
 * Pixz - https://github.com/vasi/pixz
-
+    * Note that Pixz requires quite a bit of RAM to extract even moderately sized archives. You can't get by with a 2 GB Docker VM for example.
 # Installation & Usage
 Ensure that conda and pixz are set up and in PATH. Make sure conda is also initialized: type `bash -c "conda init"` just to be sure.
 

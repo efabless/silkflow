@@ -29,7 +29,7 @@ def r(cmd, pipe_stdout=False, binary=False, **kwargs):
         stdout = subprocess.PIPE
     result = subprocess.run(cmd, stdout=stdout, **kwargs)
     if result.returncode != 0:
-        eprint("Command had a non-zero exit: " + " ".join(cmd))
+        eprint(("Command had a non-zero exit (%i): " % (result.returncode & 255)) + " ".join(cmd) )
         raise Exception("Command had a non-zero exit.")
     if pipe_stdout:
         if binary:
