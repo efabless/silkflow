@@ -23,14 +23,21 @@ from collections import namedtuple
 def eprint(*args, **kwargs):
     print(*args, file=sys.stderr, **kwargs)
 
-def r(cmd, pipe_stdout=False, binary=False, **kwargs):
-    stdout = None
-    if pipe_stdout:
+class NonZeroExit(Exception):
+    def __init(self, ec):
+        self.ec = (ec & 255)
+
+    def __str__(self):
+        return "Command had a non-zero exit (%i)" % self.ec
+
+# To silence stderr, pass it the expression open(os.devnull, "w")
+def r(cmd, pipe_stdout=False, binary=False, stdout=None, stderr=None, **kwargs):
+    if pipe_stdout: # Overrides stdout option
         stdout = subprocess.PIPE
-    result = subprocess.run(cmd, stdout=stdout, **kwargs)
+    result = subprocess.run(cmd, stdout=stdout, stderr=stderr, **kwargs)
     if result.returncode != 0:
         eprint(("Command had a non-zero exit (%i): " % (result.returncode & 255)) + " ".join(cmd) )
-        raise Exception("Command had a non-zero exit.")
+        raise NonZeroExit(result.returncode)
     if pipe_stdout:
         if binary:
             return result.stdout

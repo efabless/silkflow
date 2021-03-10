@@ -66,6 +66,7 @@ def run_vpr(top_module, arch, device, eblif, sdc, sfpath, args, noisy_warnings_l
             "--read_rr_graph", arch_info.rr_graph,
             "--read_placement_delay_lookup", arch_info.place_delay   
         ] + get_options(noisy_warnings_log) + sdc_arg + args,
+        pipe_stdout=True,
         env=env_modification
     )
     r(["mv", "vpr_stdout.log", stdout_log])
@@ -84,6 +85,7 @@ def run_genfasm(top_module, arch, device, eblif, sfpath, args, noisy_warnings_lo
             "--device", device,
             "--read_rr_graph", arch_info.rr_graph
         ] + get_options(noisy_warnings_log) + args,
+        pipe_stdout=True,
         env=env_modification
     )
     r(["mv", "vpr_stdout.log", stdout_log])

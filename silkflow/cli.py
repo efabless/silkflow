@@ -17,34 +17,73 @@
 # limitations under the License.
 
 from .vpr import run_genfasm, run_vpr, device_base
-from .util import eprint, r, d2nt, mkdirp, extract_pixz
+from .util import r, d2nt, mkdirp, extract_pixz, NonZeroExit
 from .file import FileManager
+from .error import eprint, ErrorReporter
+from .__init__ import __version__
 
 import click
 
+import io
 import os 
+import re
 import sys
 import argparse
+import tempfile
 import traceback
 import subprocess
 import functools
 from timeit import default_timer as timer
 
-
 arch = os.environ.get("SYMBIFLOW_ARCH") or "ice40"
 symbiflow_base_dir = os.getenv("SYMBIFLOW_BASE") or "/opt/symbiflow"
-archive_realpath = os.getenv("SILKFLOW_PIXZ_ARCHIVE")
 
-UNSUPPORTED_ARCH_STR = "FPGA family %s not yet supported by Silkflow." % arch
-
-if arch not in ["ice40", "xc7"]:
-    raise Exception(UNSUPPORTED_ARCH_STR)
-
-__version__ = "0.0.1"
-__project_name__ = "Silkflow"
-
-fm = FileManager(symbiflow_base_dir, archive_realpath)
+fm = FileManager(symbiflow_base_dir, os.getenv("SILKFLOW_PIXZ_ARCHIVE"))
+er = ErrorReporter()
 current_project = os.path.basename(os.getcwd())
+
+class sio(object):
+    def __init__(self):
+        self.file = tempfile.TemporaryFile(mode='w+')
+    
+    def close(self):
+        self.file.seek(0)
+        final = self.file.read()
+        self.file.close()
+        return final
+
+def handle_yosys_stderr(stderr, input_files=[]):
+    file_error_rx = r"((?:[\w\.\-\:\/]+).v):(\d+)"
+    warning_line_rx = r"warning\s*\:\s*[\s\S]*"
+
+    for line in stderr.split("\n"):
+        if line.strip() == "":
+            continue
+            
+        warning = bool(re.match(warning_line_rx, line, flags=re.I))
+
+        message = line
+        file = None
+        line_no = None
+
+        result = re.match(file_error_rx, line)
+        if result is not None and result[1] in input_files:
+            file = result[1]
+            line_no = int(result[2])
+
+        er.add(warning, message, file, line_no)
+
+def run_yosys_cmd(cmd, input_files=[], **kwargs):
+    stderr = sio()
+    try:
+        r(cmd, **kwargs, stderr=stderr.file)
+        stderr = stderr.close()
+        handle_yosys_stderr(stderr, input_files)
+    except NonZeroExit:
+        stderr = stderr.close()
+        handle_yosys_stderr(stderr, input_files)
+        er.report()
+        exit(65)
 
 def synth_fn(top_module, device, part, prxray_device, xdc_files, verilog_files):
     COMMAND_NAME = "synth"
@@ -76,16 +115,18 @@ def synth_fn(top_module, device, part, prxray_device, xdc_files, verilog_files):
 
         modified_env["PYTHON3"] = sys.executable
         modified_env["UTILS_PATH"] = fm.scripts
-
-    r([
+        
+    run_yosys_cmd([
         "yosys",
+        "-Q", "-q",
         "-p", "tcl %s" % fm.get_yosys_script(arch, "synth.tcl"),
         "-l", log_file,
         *verilog_files
-    ], env=modified_env)
+    ], env=modified_env, input_files=verilog_files)
 
-    r([
+    run_yosys_cmd([
         "yosys",
+        "-Q", "-q",
         "-p", "read_json %s; tcl %s" % (output_json, fm.get_yosys_script(arch, "conv.tcl"))
     ], env=modified_env)
 
@@ -128,7 +169,7 @@ def generate_constraints_fn(top_module, device, eblif, part, pcf, net, sdc):
         iogen_script = fm.get_arch_script(arch, "ice40_create_ioplace.py")
         ioplace_file = "%s.io.place" % current_project
         
-        ioplace_data = r([
+        r([
             "python3",
             iogen_script,
             "--blif", eblif,
@@ -146,15 +187,14 @@ def generate_constraints_fn(top_module, device, eblif, part, pcf, net, sdc):
         constraint_gen_script = fm.get_script("prjxray_create_place_constraints.py")
 
         ioplace_file = "%s.ioplace" % current_project
-        cmd = [
+
+        ioplace_data = r([
             "python3",
             iogen_script,
             "--blif", eblif,
             "--net", net,
             "--map", pin_map
-        ] + pcf_options
-
-        ioplace_data = r(cmd, env=python_env, pipe_stdout=True)
+        ] + pcf_options, env=python_env,pipe_stdout=True)
 
         with open(ioplace_file, 'w') as f:
             f.write(ioplace_data)
@@ -218,11 +258,10 @@ def write_fasm_fn(top_module, device, eblif, part, pcf, net, sdc):
 def write_bitstream_fn(top_module, device, pxray_device, bit, fasm, part, frm2bit):
     if arch == "ice40":
         python_env = fm.get_python_env(arch)
-        fasm2asc_script = fm.get_arch_script(arch, "fasm_icebox/fasm2asc.py")
         asc_file = "%s.asc" % (top_module)
         r([
             "python3",
-            fasm2asc_script,
+            fm.get_arch_script(arch, "fasm_icebox/fasm2asc.py"),
             "--device", device_base(device),
             fasm,
             asc_file
@@ -260,7 +299,7 @@ def write_bitstream_fn(top_module, device, pxray_device, bit, fasm, part, frm2bi
 
 # -- CLI --
 @click.group()
-@click.version_option(prog_name="%s" % __project_name__, version=__version__, message="%(prog)s - Version %(version)s\n© efabless Corporation 2021-present. All rights reserved.")
+@click.version_option(prog_name="Silkflow", version=__version__, message="%(prog)s - Version %(version)s\n© efabless Corporation 2021-present. All rights reserved.")
 def cli():
     pass
 
@@ -365,6 +404,7 @@ def run(top_module, device, part, pxray_device, pcf, bit, xdc_files, verilog_fil
 
     eprint("Writing bitstream…")
     write_bitstream_fn(top_module, device, pxray_device, bit, fasm, part, frm2bit)
+
     end = timer()
     eprint("Bitstream generated in %fs." % (end-start))
 cli.add_command(run)
@@ -409,10 +449,18 @@ cli.add_command(setup)
 
 def main():
     try:
+        if arch not in ["ice40", "xc7"]:
+            er.add_error("FPGA family %s not yet supported by Silkflow." % arch).report()
+            exit(64)
         cli()
+    except NonZeroExit:
+        eprint(traceback.format_exc())
+        er.add_error("A Symbiflow command has unexpectedly failed.").report()
+        exit(69)
     except Exception:
-        eprint("An unexpected exception has occurred.", traceback.format_exc())
-        exit(-1)
+        eprint(traceback.format_exc())
+        er.add_error("An unexpected exception has occurred with Silkflow.").report()
+        exit(69)
 
 if __name__ == '__main__':
     main()
