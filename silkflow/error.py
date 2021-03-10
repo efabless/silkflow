@@ -16,6 +16,7 @@
 
 import json
 import sys
+import os
 
 def eprint(*args, **kwargs):
     print(*args, file=sys.stderr, **kwargs)
@@ -45,7 +46,8 @@ class ErrorReporter(object):
     def report(self):
         for entry in self.all:
             eprint(entry["message"])
-        if not sys.stdout.isatty():
+        eprint("PRINTJSONERRORS", os.getenv("PRINT_JSON_ERRORS"))
+        if os.getenv("PRINT_JSON_ERRORS") == "1":
             print(json.dumps({
                 "errors": self.errors,
                 "warnings": self.warnings

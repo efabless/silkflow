@@ -259,6 +259,8 @@ def write_bitstream_fn(top_module, device, pxray_device, bit, fasm, part, frm2bi
     if arch == "ice40":
         python_env = fm.get_python_env(arch)
         asc_file = "%s.asc" % (top_module)
+
+        start = timer()
         r([
             "python3",
             fm.get_arch_script(arch, "fasm_icebox/fasm2asc.py"),
@@ -266,13 +268,15 @@ def write_bitstream_fn(top_module, device, pxray_device, bit, fasm, part, frm2bi
             fasm,
             asc_file
         ], env=python_env)
+        end = timer()
+        eprint(">> fasm2asc wasted %f seconds. :)" % (end - start))
         
         bitstream = r([
             "icepack",
             "top.asc"
         ], pipe_stdout=True, binary=True, env=python_env)
 
-        with open("%s.bin" % top_module, 'wb') as f:
+        with open(bit, 'wb') as f:
             f.write(bitstream)
     elif arch == "xc7":
         python_env = fm.get_python_env(arch)
@@ -372,12 +376,12 @@ cli.add_command(write_bitstream)
 
 @click.command('run', help="Full flow")
 @click.option('-t', '--top-module', required=True, help="Top module")
+@click.option('-b', '--bit', required=True, help="Name of the bitstream output")
 @click.option('-D', '--device', required=True)
 @click.option('-P', '--part', required=True)
 @click.option('-X', '--pxray-device', default=None, help="xc7 only, required - name of the device according to project xray (i.e. artix7, zynq7…)")
-@click.option('-p', '--pcf', default=None)
-@click.option('-b', '--bit', default=None)
-@click.option('-x', '--xdc-files', default=None, help="xc7 only - XDC files (comma,separated). File paths may not contain spaces.")
+@click.option('-p', '--pcf', default=None, help = "Pin constraints file. One of -p or -x are required.")
+@click.option('-x', '--xdc-files', default=None, help="xc7 only - XDC files (comma,separated). File paths may not contain spaces. One of -p or -x are required.")
 @click.option('-F', '--frm2bit', default=None, help="xc7 only - frames to bit file")
 @click.argument('verilog_files', required=True, nargs=-1)
 def run(top_module, device, part, pxray_device, pcf, bit, xdc_files, verilog_files, frm2bit):
@@ -407,6 +411,7 @@ def run(top_module, device, part, pxray_device, pcf, bit, xdc_files, verilog_fil
 
     end = timer()
     eprint("Bitstream generated in %fs." % (end-start))
+    er.report()
 cli.add_command(run)
 
 @click.command('setup', help='Setup environment from .pixz file')
@@ -450,7 +455,7 @@ cli.add_command(setup)
 def main():
     try:
         if arch not in ["ice40", "xc7"]:
-            er.add_error("FPGA family %s not yet supported by Silkflow." % arch).report()
+            er.add_error("FPGA family %s is currently unsupported by Silkflow." % arch).report()
             exit(64)
         cli()
     except NonZeroExit:
