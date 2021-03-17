@@ -124,18 +124,18 @@ def synth_fn(top_module, device, part, prxray_device, xdc_files, verilog_files):
         *verilog_files
     ], env=modified_env, input_files=verilog_files)
 
-    run_yosys_cmd([
-        "yosys",
-        "-Q", "-q",
-        "-p", "read_json %s; tcl %s" % (output_json, fm.get_yosys_script(arch, "conv.tcl"))
-    ], env=modified_env)
-
     final_output_json = "%s.json" % top_module
     r([
         "python3",
         fm.get_script("split_inouts.py"),
         "-i", output_json,
         "-o", final_output_json 
+    ], env=modified_env)
+
+    run_yosys_cmd([
+        "yosys",
+        "-Q", "-q",
+        "-p", "read_json %s; tcl %s" % (final_output_json, fm.get_yosys_script(arch, "conv.tcl"))
     ], env=modified_env)
 
     return d2nt({

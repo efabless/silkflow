@@ -17,29 +17,40 @@
 from .util import r
 import os
 
-def get_options(out_noisy_warnings):
-    return [
-        "--max_router_iterations", "500",
-        "--routing_failure_predictor", "off",
-        "--router_high_fanout_threshold", "-1",
-        "--constant_net_method", "route",
-        "--route_chan_width", "100",
-        "--clock_modeling", "route",
-        "--place_delay_model", "delta_override",
-        "--router_lookahead", "map",
-        "--check_route", "quick",
-        "--strict_checks", "off",
-        "--allow_dangling_combinational_nodes", "on",
-        "--disable_errors", "check_unbuffered_edges:check_route",
-        "--congested_routing_iteration_threshold", "0.8",
-        "--incremental_reroute_delay_ripup", "off",
-        "--base_cost_type", "delay_normalized_length_bounded",
-        "--bb_factor", "10",
-        "--initial_pres_fac", "4.0",
-        "--check_rr_graph", "off",
-        "--suppress_warnings", out_noisy_warnings,
-        #"sum_pin_class:check_unbuffered_edges:load_rr_indexed_data_T_values:check_rr_node:trans_per_R:check_route:set_rr_graph_tool_comment:warn_model_missing_timing"
+def get_options(tool, arch, out_noisy_warnings):
+    common = [
+            "--suppress_warnings", out_noisy_warnings,
+
+            "--max_router_iterations", "500",
+            "--routing_failure_predictor", "off",
+            "--router_high_fanout_threshold", "-1",
+            "--constant_net_method", "route",
+            "--clock_modeling", "route",
+            "--route_chan_width", "100",
+            "--congested_routing_iteration_threshold", "0.8",
+            "--check_rr_graph", "off",
     ]
+    if arch == "ice40":
+        return common + [
+            "--router_init_wirelength_abort_threshold", "2",
+            "--allow_unrelated_clustering", "off",
+            "--target_ext_pin_util", "0.5",
+            "--astar_fac", "1.0",
+        ]
+    elif arch == "xc7":
+        return common + [
+            "--place_delay_model", "delta_override",
+            "--router_lookahead", "map",
+            "--check_route", "quick",
+            "--strict_checks", "off",
+            "--allow_dangling_combinational_nodes", "on",
+            "--disable_errors", "check_unbuffered_edges:check_route",
+            "--incremental_reroute_delay_ripup", "off",
+            "--base_cost_type", "delay_normalized_length_bounded",
+            "--bb_factor", "10",
+            "--initial_pres_fac", "4.0"
+                        #"sum_pin_class:check_unbuffered_edges:load_rr_indexed_data_T_values:check_rr_node:trans_per_R:check_route:set_rr_graph_tool_comment:warn_model_missing_timing"
+        ]
 
 
 def device_base(device):
@@ -65,7 +76,7 @@ def run_vpr(top_module, arch, device, eblif, sdc, sfpath, args, noisy_warnings_l
             "--device", device,
             "--read_rr_graph", arch_info.rr_graph,
             "--read_placement_delay_lookup", arch_info.place_delay   
-        ] + get_options(noisy_warnings_log) + sdc_arg + args,
+        ] + get_options("vpr", arch, noisy_warnings_log) + sdc_arg + args,
         pipe_stdout=True,
         env=env_modification
     )
@@ -84,7 +95,7 @@ def run_genfasm(top_module, arch, device, eblif, sfpath, args, noisy_warnings_lo
             eblif,
             "--device", device,
             "--read_rr_graph", arch_info.rr_graph
-        ] + get_options(noisy_warnings_log) + args,
+        ] + get_options("genfasm", arch, noisy_warnings_log) + args,
         pipe_stdout=True,
         env=env_modification
     )

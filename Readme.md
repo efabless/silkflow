@@ -1,4 +1,4 @@
-# Silkflow BETA
+# Silkflow ALPHA
 A saner, python-based utility for working with Symbiflow scripts, binaries and architecture definitions.
 
 # Requirements
@@ -6,6 +6,7 @@ A saner, python-based utility for working with Symbiflow scripts, binaries and a
 * Miniconda - https://docs.conda.io/en/latest/miniconda.html < This requires like 10 GB free space
 * Pixz - https://github.com/vasi/pixz
     * Note that Pixz requires quite a bit of RAM to extract even moderately sized archives. You can't get by with a 2 GB Docker VM for example.
+
 # Installation & Usage
 Ensure that conda and pixz are set up and in PATH. Make sure conda is also initialized: type `bash -c "conda init"` just to be sure.
 
@@ -15,6 +16,7 @@ python3 -m pip install git+https://github.com/efabless/silkflow
 ```
 
 First, get a silkflow-compatible .tar.pixz file: you can find some at https://github.com/donn/symbiflow-arch-def-artifacts/releases.
+* Please note that ice40 is broken upstream- silkflow will attempt to integrate a nextpnr replacement shortly, stay tuned.
 
 Then, set up the environment using this command:
 ```sh
