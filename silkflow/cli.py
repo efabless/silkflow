@@ -92,9 +92,9 @@ def synth_fn(top_module, device, part, prxray_device, xdc_files, verilog_files):
         xdc_files = xdc_files.split(":")
 
     log_file = "%s_%s.log" % (current_project, COMMAND_NAME)
-    output_json = "%s_%s.json" % (current_project, COMMAND_NAME)
     output_verilog = "%s_%s.v" % (current_project, COMMAND_NAME)
     output_eblif = "%s.eblif" % (top_module)
+    output_json = "%s.raw.json" % (top_module)
 
     modified_env = os.environ.copy()
     modified_env["OUT_JSON"] = output_json
@@ -139,6 +139,7 @@ def synth_fn(top_module, device, part, prxray_device, xdc_files, verilog_files):
     ], env=modified_env)
 
     return d2nt({
+        "raw_json": output_json,
         "json": final_output_json,
         "eblif": output_eblif
     })
@@ -300,6 +301,36 @@ def write_bitstream_fn(top_module, device, pxray_device, bit, fasm, part, frm2bi
             "--bit_out", bit
         ] + frm2bit_args, env=python_env)
         
+def nextpnr_fn(top_module, device, json, pcf, bit):
+    if arch == "ice40":
+        try: 
+            asc = "%s.asc" % top_module
+
+            [fpga, package] = device.split("-")
+
+
+            r([
+                "nextpnr-ice40",
+                "--%s" % fpga,
+                "--package", package,
+                "--json", json,
+                "--pcf", pcf,
+                "--asc", asc
+            ])
+
+            bitstream = r([
+                "icepack",
+                asc
+            ], pipe_stdout=True, binary=True)
+
+            with open(bit, "wb") as f:
+                f.write(bitstream)
+
+        except ValueError:
+            raise Exception("Unknown device %s." % device)
+    else:
+        raise Exception("Architecture %s unsupported for nextpnr flow." % arch)
+
 
 # -- CLI --
 @click.group()
@@ -374,6 +405,17 @@ def write_bitstream(top_module, device, pxray_device, bit, fasm, part, frm2bit):
     return write_bitstream_fn(top_module, device, pxray_device, bit, fasm, part, frm2bit)
 cli.add_command(write_bitstream)
 
+@click.command('nextpnr', help="Run nextpnr")
+@click.option('-t', '--top-module', required=True, help="Top module")
+@click.option('-b', '--bit', required=True, help="Name of the bitstream output")
+@click.option('-D', '--device', required=True)
+@click.option('-P', '--part', required=True)
+@click.option('-p', '--pcf', required=True)
+@click.argument('json', required=True, nargs=-1)
+def nextpnr(top_module, bit, device, part, pcf):
+    return nextpnr_fn(top_module, device, json, pcf, bit)
+cli.add_command(nextpnr)
+
 @click.command('run', help="Full flow")
 @click.option('-t', '--top-module', required=True, help="Top module")
 @click.option('-b', '--bit', required=True, help="Name of the bitstream output")
@@ -413,6 +455,32 @@ def run(top_module, device, part, pxray_device, pcf, bit, xdc_files, verilog_fil
     eprint("Bitstream generated in %fs." % (end-start))
     er.report()
 cli.add_command(run)
+
+@click.command('run_nextpnr', help="Run full flow (nextpnr variant)")
+@click.option('-t', '--top-module', required=True, help="Top module")
+@click.option('-b', '--bit', required=True, help="Name of the bitstream output")
+@click.option('-D', '--device', required=True)
+@click.option('-P', '--part', required=True)
+@click.option('-p', '--pcf', required=True)
+@click.argument('verilog_files', required=True, nargs=-1)
+def run_nextpnr(top_module, bit, device, part, pcf, verilog_files):
+    start = timer()
+    eprint("Starting flow…")
+
+    eprint("\n---\n")
+
+    eprint("Synthesizing…")
+
+    synth_out = synth_fn(top_module, device, part, None, None, verilog_files)
+
+    eprint("Generating bitstream…")
+    nextpnr_fn(top_module, device, synth_out.json, pcf, bit)
+    
+    end = timer()
+    eprint("Bitstream generated in %fs." % (end-start))
+    er.report()
+cli.add_command(run_nextpnr)
+
 
 @click.command('setup', help='Setup environment from .pixz file')
 @click.option('-i', '--install-dir', required=True)

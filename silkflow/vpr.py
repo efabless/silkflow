@@ -14,7 +14,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-from .util import r
+from .util import r, eprint
 import os
 
 def get_options(tool, arch, out_noisy_warnings):
@@ -31,6 +31,7 @@ def get_options(tool, arch, out_noisy_warnings):
             "--check_rr_graph", "off",
     ]
     if arch == "ice40":
+        eprint("WARNING: VPR and genfasm are unverified for FPGA family %s" % arch)
         return common + [
             "--router_init_wirelength_abort_threshold", "2",
             "--allow_unrelated_clustering", "off",
@@ -38,6 +39,7 @@ def get_options(tool, arch, out_noisy_warnings):
             "--astar_fac", "1.0",
         ]
     elif arch == "xc7":
+        eprint("WARNING: VPR and genfasm are unverified for FPGA family %s" % arch)
         return common + [
             "--place_delay_model", "delta_override",
             "--router_lookahead", "map",
